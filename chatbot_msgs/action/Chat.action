@@ -1,0 +1,12 @@
+# Define the goal
+string language
+string prompt
+string system_prompt
+bool stream
+bool say_last
+---
+# Define the result
+string result
+---
+# Define a feedback message
+string status
