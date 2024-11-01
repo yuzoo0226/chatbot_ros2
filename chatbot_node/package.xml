@@ -13,6 +13,7 @@
   <test_depend>python3-pytest</test_depend>
 
   <depend>chatbot_msgs</depend>
+  <depend>tmc_voice_msgs</depend>
 
   <export>
     <build_type>ament_python</build_type>

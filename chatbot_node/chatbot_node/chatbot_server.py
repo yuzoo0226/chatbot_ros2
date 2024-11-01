@@ -4,17 +4,14 @@ import os
 import time
 import openai
 
-# ros messages
-# from tmc_msgs.msg import Voice
-# from tmc_msgs.msg import TalkRequestAction
-# from tmc_msgs.msg import TalkRequestGoal
-# from std_srvs.srv import Empty, EmptyResponse
-# from std_msgs.msg import String
-
 import rclpy
 from rclpy.node import Node
-from rclpy.action import ActionServer
+from rclpy.action import ActionServer, ActionClient
 from chatbot_msgs.action import Chat
+
+from tmc_voice_msgs.msg import Voice
+from tmc_voice_msgs.action import TalkRequest
+# from tmc_voice_msgs.srv import SetVolume, Mute
 
 
 class ChatbotServer(Node):
@@ -45,7 +42,9 @@ class ChatbotServer(Node):
         # self.action_server_register("make_response", "tam_make_response", MakeResponseAction, self.cb_make_response)
 
         if self.robot_model == "HSR":
-            pass
+            self.gp_japanese = 0
+            self.gp_english = 1
+            self._talk_action_client = ActionClient(self, TalkRequest, 'talk_request_action')
             # self.srv_chat_reset = rospy.Service('/tam_make_response/chat_history/reset', Empty, self.chat_history_reset)
             # self._ac_talk_request = actionlib.SimpleActionClient("/talk_request_action", TalkRequestAction)
 
@@ -79,24 +78,50 @@ class ChatbotServer(Node):
         self._logger.info("OPENAI API authenticate is success")
         return True
 
+    def _talk_send_goal(self, sentence="", language="") -> bool:
+        goal_msg = TalkRequest.Goal()
+        voice_data = Voice()
+        voice_data.interrupting = False
+        voice_data.queueing = False
+        if language == "ja" or language == "japanese":
+            voice_data.language = self.gp_japanese
+        elif language == "en" or language == "english":
+            voice_data.language = self.gp_english
+        else:
+            voice_data.language = self.gp_japanese
+
+        voice_data.sentence = sentence
+        goal_msg.data = voice_data
+
+        self._talk_action_client.wait_for_server()
+        self._send_goal_future = self._talk_action_client.send_goal_async(
+            goal_msg, feedback_callback=self.feedback_callback
+        )
+        self._send_goal_future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().info('Goal rejected')
+            return
+
+        self.get_logger().info('Goal accepted')
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.get_result_callback)
+
+    def feedback_callback(self, feedback_msg):
+        self.get_logger().info(f'Feedback: {feedback_msg.feedback.status_message} (Current distance: {feedback_msg.feedback.current_distance})')
+
+    def get_result_callback(self, future):
+        result = future.result().result
+        self.get_logger().info(f'Result: {result.result}')
+        self.result = result.result
+
     def say_action(self, text: str, language="ja") -> None:
         if self.robot_model == "HSR":
             try:
-                if language == "ja":
-                    self.language = TextToSpeech.JAPANESE
-                elif language == "en":
-                    self.language = TextToSpeech.ENGLISH
-                else:
-                    msg = "Unknown language. You can use 'ja' or 'en'."
-                    raise exceptions.InvalidLanguageError(msg)
-
-                self.get_logger().debug(f"<{self.robot_model}>: {text}")
-                goal = TalkRequestGoal()
-                goal.data.interrupting = False
-                goal.data.queueing = True
-                goal.data.language = self.language
-                goal.data.sentence = text
-                self._ac_talk_request.send_goal(goal)
+                self._talk_send_goal(text, language)
+                self.get_logger().info(f"{self.robot_model} say: [{text}]")
             except Exception as e:
                 self.get_logger().warn(f"You choiced [{self.robot_model}], but I cannot connect talk request.")
                 self.get_logger().warn(f"{e}")
