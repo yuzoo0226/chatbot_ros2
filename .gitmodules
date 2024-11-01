@@ -1,0 +1,3 @@
+[submodule "third_party/tmc_voice"]
+	path = third_party/tmc_voice
+	url = https://github.com/hsr-project/tmc_voice.git
